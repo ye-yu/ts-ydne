@@ -310,18 +310,22 @@ export class AsyncPrefixRouter extends AsyncRouterBase<AsyncPrefixRouter>(true) 
     return this
   }
 
+  error(...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
   error(path: string, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
   error(method: string, path: string, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
-  error(methodOrPath: any, pathOrMiddlewares: any, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]) {
+  error(methodOrPathOrMiddleware: any, pathOrMiddlewares: any, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]) {
     let method = "all"
     let path = ""
 
     if (typeof pathOrMiddlewares === "string") {
-      method = methodOrPath
+      method = methodOrPathOrMiddleware
       path = pathOrMiddlewares
-    } else {
-      path = methodOrPath
+    } else if (typeof methodOrPathOrMiddleware === "string")  {
+      path = methodOrPathOrMiddleware
       middlewares.unshift(pathOrMiddlewares as unknown as AsyncHttpErrorHandler)
+    } else {
+      middlewares.unshift(pathOrMiddlewares as unknown as AsyncHttpErrorHandler)
+      middlewares.unshift(methodOrPathOrMiddleware as unknown as AsyncHttpErrorHandler)
     }
 
     this.parent.error(method, this.prefix + path, ...middlewares)

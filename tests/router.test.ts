@@ -1,6 +1,6 @@
 import assert from "node:assert"
 import { beforeEach, describe, it } from "node:test"
-import { AsyncRouter, type AsyncHttpErrorHandler, type AsyncHttpHandler, type Method } from "../src/router.ts";
+import { AsyncRouter, type AsyncHttpErrorHandler, type AsyncHttpHandler, type AsyncParamHandler, type Method } from "../src/router.ts";
 import { METHODS } from "http";
 
 describe('AsyncRouter', () => {
@@ -349,6 +349,303 @@ describe('AsyncRouter', () => {
 
       router.post("/divide", handler)
       router.error("/divide", errorHandler)
+      // success 
+      {
+        const mockReq: any = { method: "POST", url: "/divide", body: { divident: 10, divisor: 2 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 200)
+        assert.strictEqual(mockRes.endCalledWith, 5)
+      }
+
+      // fail case
+      {
+        const mockReq: any = { method: "POST", url: "/divide", body: { divident: 10, divisor: 0 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 400)
+        assert.strictEqual(mockRes.endCalledWith, "Divisor cannot be zero")
+      }
+    })
+  })
+})
+
+
+describe('AsyncPrefixRouter', () => {
+  let router!: AsyncRouter
+
+  beforeEach(() => {
+    router = new AsyncRouter()
+  })
+
+  describe('constructor', () => {
+    it('should throw error if prefix is empty', () => {
+      assert.throws(() => {
+        router.route("")
+      }, /Prefix cannot be empty/)
+    })
+
+    it('should create prefix router with non-empty prefix', () => {
+      const prefixRouter = router.route("/api")
+      assert.ok(prefixRouter)
+      assert.strictEqual(prefixRouter.prefix, "/api")
+      assert.strictEqual(prefixRouter.parent, router)
+    })
+  })
+
+  describe('apply', () => {
+    it('should prepend prefix to routes', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      prefixRouter.apply("GET", "/users", handler)
+
+      const handlers = router.getHandlers("GET", "/api/users", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.strictEqual(handlers[0].handler, handler)
+    })
+
+    it('should support all HTTP methods via direct method calls', () => {
+      const prefixRouter = router.route("/api")
+      const handler: AsyncHttpHandler = async () => void 0
+
+      prefixRouter.get("/users", handler)
+      const handlers = router.getHandlers("GET", "/api/users", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.strictEqual(handlers[0].handler, handler)
+    })
+
+    it('should support method chaining', () => {
+      const handler1: AsyncHttpHandler = async () => void 0
+      const handler2: AsyncHttpHandler = async () => void 0
+
+      const prefixRouter = router.route("/api")
+      const result = prefixRouter.get("/users", handler1).post("/users", handler2)
+
+      assert.strictEqual(result, prefixRouter)
+      const getHandlers = router.getHandlers("GET", "/api/users", router.pathPatternToHandlers)
+      const postHandlers = router.getHandlers("POST", "/api/users", router.pathPatternToHandlers)
+      assert.strictEqual(getHandlers.length, 1)
+      assert.strictEqual(postHandlers.length, 1)
+    })
+
+    it('should handle routes with parameters in prefix path', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      prefixRouter.get("/users/:id", handler)
+
+      const handlers = router.getHandlers("GET", "/api/users/42", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.deepStrictEqual(handlers[0].params, { ":id": ["42"] })
+    })
+
+    it('should handle routes with wildcard parameters', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      const prefixRouter = router.route("/files")
+      prefixRouter.get("/*path", handler)
+
+      const handlers = router.getHandlers("GET", "/files/docs/2024/report.pdf", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.ok(handlers[0].params["*path"])
+    })
+
+    it('should handle multiple routes with same prefix', () => {
+      const handler1: AsyncHttpHandler = async () => void 0
+      const handler2: AsyncHttpHandler = async () => void 0
+      const handler3: AsyncHttpHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+
+      prefixRouter.get("/users", handler1)
+      prefixRouter.post("/users", handler2)
+      prefixRouter.delete("/users/:id", handler3)
+
+      const getHandlers = router.getHandlers("GET", "/api/users", router.pathPatternToHandlers)
+      const postHandlers = router.getHandlers("POST", "/api/users", router.pathPatternToHandlers)
+      const deleteHandlers = router.getHandlers("DELETE", "/api/users/42", router.pathPatternToHandlers)
+
+      assert.strictEqual(getHandlers.length, 1)
+      assert.strictEqual(postHandlers.length, 1)
+      assert.strictEqual(deleteHandlers.length, 1)
+      assert.strictEqual(deleteHandlers[0].params[":id"][0], "42")
+    })
+  })
+
+  describe('param', () => {
+    it('should register param handler for named parameter', () => {
+      const paramHandler: AsyncParamHandler = async () => void 0
+      const prefixRouter = router.route("/users")
+      prefixRouter.param("id", paramHandler)
+
+      const paramHandlers = router.pathPatternToParamHandlers.get("/users")
+      assert.ok(paramHandlers)
+      assert.ok(paramHandlers.has(":id"))
+      assert.ok(paramHandlers.has("*id"))
+    })
+
+    it('should register multiple param handlers', () => {
+      const paramHandler1: AsyncParamHandler = async () => void 0
+      const paramHandler2: AsyncParamHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      prefixRouter.param("id", paramHandler1)
+      prefixRouter.param("id", paramHandler2)
+
+      const paramHandlers = router.pathPatternToParamHandlers.get("/api")
+      const handlers = paramHandlers?.get(":id") ?? []
+      assert.ok(handlers.length >= 2)
+    })
+  })
+
+  describe('error', () => {
+    it('should register error handler for all methods', () => {
+      const errorHandler: AsyncHttpErrorHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      prefixRouter.error("/users", errorHandler)
+
+      const handlers = router.getHandlers("all", "/api/users", router.pathPatternToErrorHandlers)
+      assert.ok(handlers.length > 0)
+      assert.ok(handlers.some(h => h.handler === errorHandler))
+    })
+
+    it('should register error handler for specific method', () => {
+      const errorHandler: AsyncHttpErrorHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      prefixRouter.error("POST", "/users", errorHandler)
+
+      const handlers = router.getHandlers("post", "/api/users", router.pathPatternToErrorHandlers)
+      assert.ok(handlers.length > 0)
+      assert.ok(handlers.some(h => h.handler === errorHandler))
+    })
+
+    it('should support method chaining with error', () => {
+      const errorHandler1: AsyncHttpErrorHandler = async () => void 0
+      const errorHandler2: AsyncHttpErrorHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      const result = prefixRouter.error("/users", errorHandler1).error("/posts", errorHandler2)
+
+      assert.strictEqual(result, prefixRouter)
+    })
+
+    it('should handle multiple error handlers with prefix', () => {
+      const errorHandler1: AsyncHttpErrorHandler = async () => void 0
+      const errorHandler2: AsyncHttpErrorHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      
+      prefixRouter.error("/users", errorHandler1)
+      prefixRouter.error("/users", errorHandler2)
+
+      const handlers = router.getHandlers("all", "/api/users", router.pathPatternToErrorHandlers)
+      assert.ok(handlers.length >= 2)
+      assert.ok(handlers.some(h => h.handler === errorHandler1))
+      assert.ok(handlers.some(h => h.handler === errorHandler2))
+    })
+  })
+
+  describe('integration', () => {
+    it('should handle complete workflow with prefix router', async () => {
+      const order: string[] = []
+
+      const handler1: AsyncHttpHandler = async () => {
+        order.push("handler1")
+      }
+      const handler2: AsyncHttpHandler = async () => {
+        order.push("handler2")
+      }
+
+      const prefixRouter = router.route("/api")
+      prefixRouter.get("/users", handler1)
+      prefixRouter.post("/users", handler2)
+
+      const getHandlers = router.getHandlers("GET", "/api/users", router.pathPatternToHandlers)
+      for (const h of getHandlers) {
+        await h.handler({} as any, {} as any)
+      }
+
+      assert.deepStrictEqual(order, ["handler1"])
+
+      order.length = 0
+      const postHandlers = router.getHandlers("POST", "/api/users", router.pathPatternToHandlers)
+      for (const h of postHandlers) {
+        await h.handler({} as any, {} as any)
+      }
+
+      assert.deepStrictEqual(order, ["handler2"])
+    })
+
+    it('should handle multiple prefix routers on same parent', () => {
+      const handler1: AsyncHttpHandler = async () => void 0
+      const handler2: AsyncHttpHandler = async () => void 0
+
+      const apiRouter = router.route("/api")
+      const webRouter = router.route("/web")
+
+      apiRouter.get("/users", handler1)
+      webRouter.get("/users", handler2)
+
+      const apiHandlers = router.getHandlers("GET", "/api/users", router.pathPatternToHandlers)
+      const webHandlers = router.getHandlers("GET", "/web/users", router.pathPatternToHandlers)
+
+      assert.strictEqual(apiHandlers.length, 1)
+      assert.strictEqual(webHandlers.length, 1)
+      assert.strictEqual(apiHandlers[0].handler, handler1)
+      assert.strictEqual(webHandlers[0].handler, handler2)
+    })
+
+    it('should handle prefix router with error handling', async () => {
+      const prefixRouter = router.route("/api")
+      
+      const handler: AsyncHttpHandler = async (req: any) => {
+        if (req.shouldError) {
+          throw new Error("Test error")
+        }
+      }
+
+      const errorHandler: AsyncHttpErrorHandler = async (errors: any[], req: any, res: any) => {
+        res.statusCode = 500
+        res.errorHandled = true
+      }
+
+      prefixRouter.post("/data", handler)
+      prefixRouter.error("/data", errorHandler)
+
+      const mockReq: any = { method: "POST", url: "/api/data", shouldError: true }
+      const mockRes: any = { statusCode: 200 }
+
+      await router.handle(mockReq, mockRes)
+      assert.strictEqual(mockRes.statusCode, 500)
+      assert.ok(mockRes.errorHandled)
+    })
+
+    it('should correctly extract parameters from prefixed routes', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      const prefixRouter = router.route("/api")
+      
+      prefixRouter.get("/users/:userId/posts/:postId", handler)
+
+      const handlers = router.getHandlers("GET", "/api/users/123/posts/456", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.deepStrictEqual(handlers[0].params, {
+        ":userId": ["123"],
+        ":postId": ["456"]
+      })
+    })
+
+    it('should integrate with .handle', async () => {
+      const handler: AsyncHttpHandler = async (req: any, res: any) => {
+        const { divident, divisor } = req.body || {}
+        if (divisor === 0) {
+          throw new Error("Divisor cannot be zero")
+        }
+        return res.end(divident / divisor)
+      }
+
+      const errorHandler: AsyncHttpErrorHandler = async (errors: any[], req: any, res: any) => {
+        res.statusCode = 400
+        res.end(errors[0].message)
+      }
+
+      router.route("/divide").post(handler)
+      router.route("/divide").error(errorHandler)
       // success 
       {
         const mockReq: any = { method: "POST", url: "/divide", body: { divident: 10, divisor: 2 } }
