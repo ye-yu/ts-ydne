@@ -105,7 +105,7 @@ export class AsyncRouter extends AsyncRouterBase<AsyncPrefixRouter>() {
   error(path: string, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
   error(method: string, path: string, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
   error(methodOrPath: any, pathOrMiddlewares: any, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]) {
-    let method = "all"
+    let method = "use"
     let path = ""
 
     if (typeof pathOrMiddlewares === "string") {
@@ -221,7 +221,7 @@ export class AsyncRouter extends AsyncRouterBase<AsyncPrefixRouter>() {
   defaultParamHandlerFor(name: string): AsyncParamHandler {
     return (req, _: any, value: string | string[], __?: string[]) => {
       const params = Reflect.get(req, "params") ?? {} as Record<string, string[]>
-      params[name] = value
+      params[name.slice(1)] = value
       Object.assign(req, { params })
     }
   }
@@ -233,20 +233,30 @@ export class AsyncRouter extends AsyncRouterBase<AsyncPrefixRouter>() {
     const parsedUrl = new URL(url ?? "", "http://example.com")
     const handlers = this.getHandlers(method ?? "all", parsedUrl.pathname, this.pathPatternToHandlers)
     let errors: any[] = []
-    for (const handler of handlers) {
+    outer: for (const handler of handlers) {
       const paramHandlers = this.pathPatternToParamHandlers.get(parsedUrl.pathname)
       if (paramHandlers) {
         for (const [name, values] of Object.entries(handler.params)) {
           for (const paramHandler of paramHandlers.get(name) ?? [this.defaultParamHandlerFor(name)]) {
             const value = name.startsWith(":") ? values[0] : this.collapseWildcard(values)
-            paramHandler(req, res, value, values)
+            try {
+              await Promise.resolve(paramHandler(req, res, value, values))
+            } catch (err) {
+              errors.push(err)
+              break outer
+            }
           }
         }
       } else {
         for (const [name, values] of Object.entries(handler.params)) {
           const paramHandler = this.defaultParamHandlerFor(name)
           const value = name.startsWith(":") ? values[0] : this.collapseWildcard(values)
-          paramHandler(req, res, value, values)
+          try {
+            await Promise.resolve(paramHandler(req, res, value, values))
+          } catch (err) {
+            errors.push(err)
+            break outer
+          }
         }
       }
 
@@ -254,7 +264,7 @@ export class AsyncRouter extends AsyncRouterBase<AsyncPrefixRouter>() {
         await Promise.resolve(handler.handler(req, res))
       } catch (err) {
         errors.push(err)
-        break
+        break outer
       }
     }
 
@@ -262,20 +272,30 @@ export class AsyncRouter extends AsyncRouterBase<AsyncPrefixRouter>() {
 
     const errorHandlers = this.getHandlers(method ?? "all", parsedUrl.pathname, this.pathPatternToErrorHandlers)
 
-    for (const handler of errorHandlers) {
+    errorOuter: for (const handler of errorHandlers) {
       const paramHandlers = this.pathPatternToParamHandlers.get(parsedUrl.pathname)
       if (paramHandlers) {
         for (const [name, values] of Object.entries(handler.params)) {
           for (const paramHandler of paramHandlers.get(name) ?? [this.defaultParamHandlerFor(name)]) {
             const value = name.startsWith(":") ? values[0] : this.collapseWildcard(values)
-            paramHandler(req, res, value, values)
+            try {
+              await Promise.resolve(paramHandler(req, res, value, values))
+            } catch (err) {
+              errors.push(err)
+              continue errorOuter
+            }
           }
         }
       } else {
         for (const [name, values] of Object.entries(handler.params)) {
           const paramHandler = this.defaultParamHandlerFor(name)
           const value = name.startsWith(":") ? values[0] : this.collapseWildcard(values)
-          paramHandler(req, res, value, values)
+          try {
+            await Promise.resolve(paramHandler(req, res, value, values))
+          } catch (err) {
+            errors.push(err)
+            continue errorOuter
+          }
         }
       }
 
@@ -314,18 +334,22 @@ export class AsyncPrefixRouter extends AsyncRouterBase<AsyncPrefixRouter>(true) 
   error(path: string, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
   error(method: string, path: string, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]): AsyncPrefixRouter
   error(methodOrPathOrMiddleware: any, pathOrMiddlewares: any, ...middlewares: (AsyncHttpErrorHandler | AsyncHttpErrorHandler[])[]) {
-    let method = "all"
+    let method = "use"
     let path = ""
 
     if (typeof pathOrMiddlewares === "string") {
       method = methodOrPathOrMiddleware
       path = pathOrMiddlewares
-    } else if (typeof methodOrPathOrMiddleware === "string")  {
+    } else if (typeof methodOrPathOrMiddleware === "string") {
       path = methodOrPathOrMiddleware
       middlewares.unshift(pathOrMiddlewares as unknown as AsyncHttpErrorHandler)
     } else {
-      middlewares.unshift(pathOrMiddlewares as unknown as AsyncHttpErrorHandler)
-      middlewares.unshift(methodOrPathOrMiddleware as unknown as AsyncHttpErrorHandler)
+      if (pathOrMiddlewares) {
+        middlewares.unshift(pathOrMiddlewares as unknown as AsyncHttpErrorHandler)
+      }
+      if (methodOrPathOrMiddleware) {
+        middlewares.unshift(methodOrPathOrMiddleware as unknown as AsyncHttpErrorHandler)
+      }
     }
 
     this.parent.error(method, this.prefix + path, ...middlewares)

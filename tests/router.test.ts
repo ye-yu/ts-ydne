@@ -530,7 +530,7 @@ describe('AsyncPrefixRouter', () => {
       const errorHandler1: AsyncHttpErrorHandler = async () => void 0
       const errorHandler2: AsyncHttpErrorHandler = async () => void 0
       const prefixRouter = router.route("/api")
-      
+
       prefixRouter.error("/users", errorHandler1)
       prefixRouter.error("/users", errorHandler2)
 
@@ -593,7 +593,7 @@ describe('AsyncPrefixRouter', () => {
 
     it('should handle prefix router with error handling', async () => {
       const prefixRouter = router.route("/api")
-      
+
       const handler: AsyncHttpHandler = async (req: any) => {
         if (req.shouldError) {
           throw new Error("Test error")
@@ -619,7 +619,7 @@ describe('AsyncPrefixRouter', () => {
     it('should correctly extract parameters from prefixed routes', () => {
       const handler: AsyncHttpHandler = async () => void 0
       const prefixRouter = router.route("/api")
-      
+
       prefixRouter.get("/users/:userId/posts/:postId", handler)
 
       const handlers = router.getHandlers("GET", "/api/users/123/posts/456", router.pathPatternToHandlers)
@@ -664,6 +664,69 @@ describe('AsyncPrefixRouter', () => {
         await router.handle(mockReq, mockRes)
         assert.strictEqual(mockRes.statusCode, 400)
         assert.strictEqual(mockRes.endCalledWith, "Divisor cannot be zero")
+      }
+    })
+
+
+    it('should assign param to request', async () => {
+      const handler: AsyncHttpHandler = async (req: any, res: any) => {
+        const { operand1, operand2 } = req.body || {}
+        if (typeof operand1 !== "number" && typeof operand2 !== "number") {
+          throw new Error(`Invalid operands: ${operand1} ${operand2}`)
+        }
+        const operator = req.params["operator"]
+        switch (operator) {
+          case "divide": {
+            if (operand2 === 0) {
+              throw new Error("Divisor cannot be zero")
+            }
+            return res.end(operand1 / operand2)
+          }
+          case "multiply": {
+            return res.end(operand1 * operand2)
+          }
+          default: {
+            throw new Error("Invalid operator: " + operator)
+          }
+
+        }
+      }
+
+      const errorHandler: AsyncHttpErrorHandler = async (errors: any[], req: any, res: any) => {
+        res.statusCode = 400
+        res.end(errors[0].message)
+      }
+
+      router.route("/math").post("/:operator", handler)
+      router.route("/math").error(errorHandler)
+      // success 
+      {
+        const mockReq: any = { method: "POST", url: "/math/divide", body: { operand1: 10, operand2: 2 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 200)
+        assert.strictEqual(mockRes.endCalledWith, 5)
+      }
+
+      // fail case
+      {
+        const mockReq: any = { method: "POST", url: "/math/divide", body: { operand1: 10, operand2: 0 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 400)
+        assert.strictEqual(mockRes.endCalledWith, "Divisor cannot be zero")
+      }
+
+      // fail case with invalid operator
+      {
+        const mockReq: any = { method: "POST", url: "/math/add", body: { operand1: 10, operand2: 2 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 400)
+        assert.strictEqual(mockRes.endCalledWith, "Invalid operator: add")
       }
     })
   })
