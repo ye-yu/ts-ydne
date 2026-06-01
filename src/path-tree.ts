@@ -145,6 +145,14 @@ export class PathTree<T> {
         for (const paramNode of node.childrenOfParams.values()) {
           const newParams = { ...params }
           newParams[paramNode.name] = [needles[0]]
+          if (needles.length === 1 && paramNode.value !== undefined) {
+            matched.push({
+              params: newParams,
+              segments: [...segments],
+              node: paramNode,
+            })
+            continue
+          }
           iterateNext.push({
             needles: [...needles].slice(1),
             segments: [...segments, paramNode.name],

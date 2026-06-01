@@ -22,9 +22,11 @@ describe("PathTree", () => {
 
     const helloMatch = results.find((result) => result.node.value === "hello")
     assert.deepStrictEqual(helloMatch?.params, {})
+    assert.deepStrictEqual(helloMatch?.segments, ["/", "a", "/", "b", "/", "hello"])
 
     const allMatch = results.find((result) => result.node.value === "hello from all")
     assert.deepStrictEqual(allMatch?.params, { "*all": ["hello"] })
+    assert.deepStrictEqual(allMatch?.segments, ["/", "a", "/", "b", "/", "*all"])
   })
 
   it("matches the optional grouped route with an inner segment", () => {
@@ -39,17 +41,21 @@ describe("PathTree", () => {
 
     const helloMatch = results.find((result) => result.node.value === "hello")
     assert.deepStrictEqual(helloMatch?.params, {})
+    assert.deepStrictEqual(helloMatch?.segments, ["/", "a", "/", "b", "/", "d", "/", "hello"])
 
     const allMatch = results.find(
       (result) => result.node.value === "hello from all" && result.params["*all"]?.join("") === "d/hello"
     )
     assert.deepStrictEqual(allMatch?.params, { "*all": ["d", "/", "hello"] })
+    assert.deepStrictEqual(allMatch?.segments, ["/", "a", "/", "b", "/", "*all"])
 
     const nameParam = results.find((result) => result.node.value === "hello from name")
     assert.deepStrictEqual(nameParam?.params, { ":name": ["d"] })
+    assert.deepStrictEqual(nameParam?.segments, ["/", "a", "/", "b", "/", ":name", "/", "hello"])
 
     const nameWildcard = results.find((result) => result.node.value === "hello from name star")
     assert.deepStrictEqual(nameWildcard?.params, { "*name": ["d"] })
+    assert.deepStrictEqual(nameWildcard?.segments, ["/", "a", "/", "b", "/", "*name", "/", "hello"])
   })
 
   it("matches named parameter and wildcard routes", () => {
@@ -63,9 +69,15 @@ describe("PathTree", () => {
 
     const nameParam = results.find((result) => result.node.value === "hello from name")
     assert.deepStrictEqual(nameParam?.params, { ":name": ["name"] })
+    assert.deepStrictEqual(nameParam?.segments, ["/", "a", "/", "b", "/", ":name", "/", "hello"])
 
     const nameWildcard = results.find((result) => result.node.value === "hello from name star")
     assert.deepStrictEqual(nameWildcard?.params, { "*name": ["name"] })
+    assert.deepStrictEqual(nameWildcard?.segments, ["/", "a", "/", "b", "/", "*name", "/", "hello"])
+
+    const allMatch = results.find((result) => result.node.value === "hello from all")
+    assert.deepStrictEqual(allMatch?.params, { "*all": ["name", "/", "hello"] })
+    assert.deepStrictEqual(allMatch?.segments, ["/", "a", "/", "b", "/", "*all"])
   })
 
   it("matches deeper wildcard paths", () => {
@@ -78,6 +90,7 @@ describe("PathTree", () => {
 
     const nameWildcard = results.find((result) => result.node.value === "hello from name star")
     assert.deepStrictEqual(nameWildcard?.params, { "*name": ["name", "/", "deep"] })
+    assert.deepStrictEqual(nameWildcard?.segments, ["/", "a", "/", "b", "/", "*name", "/", "hello"])
   })
 
   it("matches nested wildcard route with tail segments", () => {
@@ -93,6 +106,13 @@ describe("PathTree", () => {
       "*all": ["name", "/", "deep", "/", "something"],
       "*next": ["hello", "/", "again"],
     })
+    assert.deepStrictEqual(allNext?.segments, ["/", "a", "/", "b", "/", "*all", "/", "and", "/", "*next"])
+
+    const allMatch = results.find((result) => result.node.value === "hello from all")
+    assert.deepStrictEqual(allMatch?.params, {
+      "*all": ["name", "/", "deep", "/", "something", "/", "and", "/", "hello", "/", "again"],
+    })
+    assert.deepStrictEqual(allMatch?.segments, ["/", "a", "/", "b", "/", "*all"])
   })
 
   it("does not match a non-existent route", () => {
