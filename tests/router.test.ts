@@ -1,6 +1,6 @@
 import assert from "node:assert"
 import { beforeEach, describe, it } from "node:test"
-import { AsyncRouter, type AsyncHttpHandler, type Method } from "../src/router.ts";
+import { AsyncRouter, type AsyncHttpErrorHandler, type AsyncHttpHandler, type Method } from "../src/router.ts";
 import { METHODS } from "http";
 
 describe('AsyncRouter', () => {
@@ -178,6 +178,196 @@ describe('AsyncRouter', () => {
       assert.strictEqual(handlers[2].handler, handler2)
       assert.strictEqual(handlers[3].handler, handler3)
       assert.strictEqual(handlers[4].handler, useAfter)
+    })
+  })
+
+  describe('param', () => {
+    it('should extract single named parameter', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      router.get("/users/:id", handler)
+
+      const handlers = router.getHandlers("GET", "/users/123", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.deepStrictEqual(handlers[0].params, { ":id": ["123"] })
+    })
+
+    it('should extract multiple named parameters', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      router.get("/users/:userId/posts/:postId", handler)
+
+      const handlers = router.getHandlers("GET", "/users/42/posts/99", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.deepStrictEqual(handlers[0].params, { ":userId": ["42"], ":postId": ["99"] })
+    })
+
+    it('should extract wildcard parameter as array', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      router.get("/files/*path", handler)
+
+      const handlers = router.getHandlers("GET", "/files/docs/2024/report.pdf", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.ok(handlers[0].params["*path"])
+      assert.strictEqual(handlers[0].params["*path"].length, 5)
+    })
+
+    it('should handle parameters with special characters', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      router.get("/api/:version/resource/:id", handler)
+
+      const handlers = router.getHandlers("GET", "/api/v2/resource/abc-123", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 1)
+      assert.deepStrictEqual(handlers[0].params, { ":version": ["v2"], ":id": ["abc-123"] })
+    })
+  })
+
+  describe('error', () => {
+    it('should handle no matching routes', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      router.get("/hello", handler)
+
+      const handlers = router.getHandlers("GET", "/goodbye", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 0)
+    })
+
+    it('should handle method not allowed', () => {
+      const handler: AsyncHttpHandler = async () => void 0
+      router.post("/data", handler)
+
+      const handlers = router.getHandlers("GET", "/data", router.pathPatternToHandlers)
+      assert.strictEqual(handlers.length, 0)
+    })
+
+    it('should collect multiple error handlers for a path', () => {
+      const errorHandler1 = async (errors: any[], req: any, res: any) => void 0
+      const errorHandler2 = async (errors: any[], req: any, res: any) => void 0
+
+      router.error("/api", errorHandler1)
+      router.error("/api", errorHandler2)
+
+      const handlers = router.getHandlers("all", "/api", router.pathPatternToErrorHandlers)
+      assert.ok(handlers.length > 0)
+      assert.ok(handlers.some(h => h.handler === errorHandler1))
+      assert.ok(handlers.some(h => h.handler === errorHandler2))
+    })
+
+    it('should return empty array when no error handlers match', () => {
+      const errorHandler: AsyncHttpErrorHandler = async () => void 0
+      router.error("/admin", errorHandler)
+
+      const handlers = router.getHandlers("all", "/public/page", router.pathPatternToErrorHandlers)
+      assert.strictEqual(handlers.length, 0)
+    })
+  })
+
+  describe('handle', () => {
+    it('should execute handler with request and response objects', async () => {
+      let called = false
+      let receivedReq: any = null
+      let receivedRes: any = null
+
+      const handler: AsyncHttpHandler = async (req: any, res: any) => {
+        called = true
+        receivedReq = req
+        receivedRes = res
+      }
+
+      const req: any = { method: "GET", url: "/test" }
+      const res: any = { statusCode: 200 }
+
+      await handler(req, res)
+      assert.ok(called)
+      assert.strictEqual(receivedReq, req)
+      assert.strictEqual(receivedRes, res)
+    })
+
+    it('should handle synchronous handler', async () => {
+      let executed = false
+      const handler: AsyncHttpHandler = (req: any, res: any) => {
+        executed = true
+      }
+
+      await handler({} as any, {} as any)
+      assert.ok(executed)
+    })
+
+    it('should handle multiple handlers in sequence', async () => {
+      const order: string[] = []
+
+      const handler1: AsyncHttpHandler = async (req: any, res: any) => {
+        order.push("handler1")
+      }
+      const handler2: AsyncHttpHandler = async (req: any, res: any) => {
+        order.push("handler2")
+      }
+      const handler3: AsyncHttpHandler = async (req: any, res: any) => {
+        order.push("handler3")
+      }
+
+      router.get("/test", handler1)
+      router.get("/test", handler2)
+      router.get("/test", handler3)
+
+      const handlers = router.getHandlers("GET", "/test", router.pathPatternToHandlers)
+      for (const h of handlers) {
+        await h.handler({} as any, {} as any)
+      }
+
+      assert.deepStrictEqual(order, ["handler1", "handler2", "handler3"])
+    })
+
+    it('should provide request and response context to handlers', async () => {
+      const captured: any = {}
+
+      const handler: AsyncHttpHandler = async (req: any, res: any) => {
+        captured.req = req
+        captured.res = res
+      }
+
+      const mockReq: any = { method: "POST", url: "/api/users", headers: { "content-type": "application/json" } }
+      const mockRes: any = { statusCode: 201, locals: {} }
+
+      await handler(mockReq, mockRes)
+
+      assert.strictEqual(captured.req.method, "POST")
+      assert.strictEqual(captured.req.url, "/api/users")
+      assert.strictEqual(captured.res.statusCode, 201)
+    })
+
+    it('should handle errors thrown in handlers', async () => {
+      const handler: AsyncHttpHandler = async (req: any, res: any) => {
+        const { divident, divisor } = req.body || {}
+        if (divisor === 0) {
+          throw new Error("Divisor cannot be zero")
+        }
+        return res.end(divident / divisor)
+      }
+
+      const errorHandler: AsyncHttpErrorHandler = async (errors: any[], req: any, res: any) => {
+        res.statusCode = 400
+        res.end(errors[0].message)
+      }
+
+      router.post("/divide", handler)
+      router.error("/divide", errorHandler)
+      // success 
+      {
+        const mockReq: any = { method: "POST", url: "/divide", body: { divident: 10, divisor: 2 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 200)
+        assert.strictEqual(mockRes.endCalledWith, 5)
+      }
+
+      // fail case
+      {
+        const mockReq: any = { method: "POST", url: "/divide", body: { divident: 10, divisor: 0 } }
+        const mockRes: any = { statusCode: 200, endCalledWith: null, end: function (arg: any) { this.endCalledWith = arg } }
+
+        await router.handle(mockReq, mockRes)
+        assert.strictEqual(mockRes.statusCode, 400)
+        assert.strictEqual(mockRes.endCalledWith, "Divisor cannot be zero")
+      }
     })
   })
 })
